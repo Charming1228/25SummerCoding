@@ -1,8 +1,6 @@
 #include <iostream>
 #include <vector>
 #include <queue>
-#include <stack>
-#include <stdio.h>
 #include <fstream>
 #include <string>
 #include <algorithm>
@@ -11,18 +9,18 @@
 using namespace std;
 
 #define DEPTH 5        // 最大深度
-#define FILE_COUNT "1" // txt文件编号
+#define FILE_COUNT "3" // txt文件编号
 
 // 在数组中建立0-5和方位的对应关系
 vector<string> direction = {"front", "up", "left", "right", "down", "back"};
 
 struct cube_node
 {
-    char color[6][3][3];
-    int action_to_me;
-    vector<string> action;
+    char color[6][3][3]; //6面3*3
+    int action_to_me; //从初始节点到当前状态的步数
+    vector<string> action; //记录初始状态到当前状态的动作序列
     
-    // 重载==运算符用于哈希比较
+    // 重载==运算符用于哈希比较 6*3*3完全一致
     bool operator==(const cube_node& other) const {
         for (int k = 0; k < 6; k++) {
             for (int i = 0; i < 3; i++) {
@@ -37,7 +35,7 @@ struct cube_node
     }
 };
 
-// 哈希函数用于unordered_set
+// 哈希函数用于unordered_set 存储 cube_node 避免重复状态
 namespace std {
     template<>
     struct hash<cube_node> {
@@ -46,7 +44,7 @@ namespace std {
             for (int k = 0; k < 6; k++) {
                 for (int i = 0; i < 3; i++) {
                     for (int j = 0; j < 3; j++) {
-                        hash_val = hash_val * 31 + node.color[k][i][j];
+                        hash_val = hash_val * 31 + static_cast<unsigned char>(node.color[k][i][j]);// ①使用31作为乘数 ②避免负数参与运算
                     }
                 }
             }
@@ -55,7 +53,7 @@ namespace std {
     };
 }
 
-// 判定该种情况是否为已还原
+// 判定该种情况是否为已还原 6面纯色
 bool is_target_status(cube_node *this_node)
 {
     int k, i, j;
@@ -69,7 +67,7 @@ bool is_target_status(cube_node *this_node)
     return true;
 }
 
-// 对一个面进行顺时针旋转,plane为平面编号
+// 对一个面进行顺时针旋转,plane为平面编号《单面自旋顺时针90°》
 cube_node *turn_1(cube_node *cur_node, int plane)
 {
     cube_node *new_node = new cube_node();
@@ -78,6 +76,7 @@ cube_node *turn_1(cube_node *cur_node, int plane)
     for (i = 0; i <= 2; i++)
         for (j = 0; j <= 2; j++)
             new_node->color[plane][i][2 - j] = cur_node->color[plane][j][i];
+            // new[i][2-j] = old[j][i] 第一行变最后一列...
     return new_node;
 }
 
@@ -90,6 +89,7 @@ cube_node *turn_0(cube_node *cur_node, int plane)
     for (i = 0; i <= 2; i++)
         for (j = 0; j <= 2; j++)
             new_node->color[plane][2 - i][j] = cur_node->color[plane][j][i];
+            // new[2-i][j] = old[j][i] 最后一列变第一行...
     return new_node;
 }
 
@@ -99,17 +99,19 @@ cube_node *turn012_1(cube_node *cur_node, int k)
 {
     cube_node *new_node = new cube_node();
     *new_node = *cur_node;
-    int order[4] = {5, 1, 0, 4}; // 表示交换顺序，5的某一行给1，1的某一行给0，以此类推
+    int order[4] = {5, 1, 0, 4}; // 5back 1up 0front 4down——>最终回到5back的交换顺序 交换其中一行 后续6个操作实现
     int i, j;
     for (i = 0; i <= 2; i++)
         for (j = 0; j <= 2; j++)
             new_node->color[order[i + 1]][j][k] = cur_node->color[order[i]][j][k];
+            // new[order[i+1]][j][k] = old[order[i]][j][k] 按照order顺序交换行
     for (j = 0; j <= 2; j++)
         new_node->color[5][j][k] = cur_node->color[4][j][k];
+        // 最后再把down回到back
     return new_node;
 }
 
-// 针对前后上下四个面的逆时针旋转，在动作012中使用
+// 针对前后上下四个面的逆时针旋转，在动作012中使用 把顺时针情况的order倒序即可
 cube_node *turn012_0(cube_node *cur_node, int k)
 {
     cube_node *new_node = new cube_node();
@@ -128,36 +130,42 @@ cube_node *turn012_0(cube_node *cur_node, int k)
 cube_node *set_turn0_1(cube_node *cur_node)
 {
     return turn_1(turn012_1(cur_node, 0), 2);
+    // 先前后上下四个面的行变换，再对2left面顺时针旋转
 }
 
 // 0变换的负向（逆时针）
 cube_node *set_turn0_0(cube_node *cur_node)
 {
     return turn_0(turn012_0(cur_node, 0), 2);
+    // 先前后上下四个面的行变换，再对2left面逆时针旋转
 }
 
 // 1变换的正向（顺时针）
 cube_node *set_turn1_1(cube_node *cur_node)
 {
     return turn012_1(cur_node, 1);
+    // 先前后上下四个面的行变换，由于行变换是中间行，不牵扯侧面旋转
 }
 
 // 1变换的负向（逆时针）
 cube_node *set_turn1_0(cube_node *cur_node)
 {
     return turn012_0(cur_node, 1);
+    // 先前后上下四个面的行变换，由于行变换是中间行，不牵扯侧面旋转
 }
 
 // 2变换的正向（顺时针）
 cube_node *set_turn2_1(cube_node *cur_node)
 {
     return turn_0(turn012_1(cur_node, 2), 3);
+    // 先前后上下四个面的行变换，再对3right面逆时针旋转
 }
 
 // 2变换的负向（逆时针）
 cube_node *set_turn2_0(cube_node *cur_node)
 {
     return turn_1(turn012_0(cur_node, 2), 3);
+    // 先前后上下四个面的行变换，再对3right面顺时针旋转
 }
 
 // 针对前后左右四个面的顺时针旋转，在动作345中使用
@@ -170,10 +178,10 @@ cube_node *turn345_1(cube_node *cur_node, int k)
     int num = k - 3; // num = 2 1 0
     for (i = 0; i <= 2; i++)
     {
-        new_node->color[2][i][num] = cur_node->color[0][2 - num][i];
-        new_node->color[5][num][2 - i] = cur_node->color[2][i][num];
-        new_node->color[3][2 - i][2 - num] = cur_node->color[5][num][2 - i];
-        new_node->color[0][2 - num][i] = cur_node->color[3][2 - i][2 - num];
+        new_node->color[2][i][num] = cur_node->color[0][2 - num][i]; // 前->左
+        new_node->color[5][num][2 - i] = cur_node->color[2][i][num]; // 左->后
+        new_node->color[3][2 - i][2 - num] = cur_node->color[5][num][2 - i]; // 后->右
+        new_node->color[0][2 - num][i] = cur_node->color[3][2 - i][2 - num]; // 右->前
     }
     return new_node;
 }
@@ -187,51 +195,57 @@ cube_node *turn345_0(cube_node *cur_node, int k)
     int num = k - 3; // num = 2 1 0
     for (i = 0; i <= 2; i++)
     {
-        new_node->color[0][2 - num][i] = cur_node->color[2][i][num];
-        new_node->color[2][i][num] = cur_node->color[5][num][2 - i];
-        new_node->color[5][num][2 - i] = cur_node->color[3][2 - i][2 - num];
-        new_node->color[3][2 - i][2 - num] = cur_node->color[0][2 - num][i];
+        new_node->color[0][2 - num][i] = cur_node->color[2][i][num]; // 左->前
+        new_node->color[2][i][num] = cur_node->color[5][num][2 - i]; // 后->左
+        new_node->color[5][num][2 - i] = cur_node->color[3][2 - i][2 - num]; // 右->后
+        new_node->color[3][2 - i][2 - num] = cur_node->color[0][2 - num][i]; // 前->右
     }
     return new_node;
 }
 
-// 动作5的逆时针
-cube_node *set_turn5_0(cube_node *cur_node)
-{
-    return turn_0(turn345_0(cur_node, 5), 1);
-}
-
-// 动作5的顺时针
-cube_node *set_turn5_1(cube_node *cur_node)
-{
-    return turn_1(turn345_1(cur_node, 5), 1);
-}
-
-// 动作4的逆时针
-cube_node *set_turn4_0(cube_node *cur_node)
-{
-    return turn345_0(cur_node, 4);
-}
-
-// 动作4的顺时针
-cube_node *set_turn4_1(cube_node *cur_node)
-{
-    return turn345_1(cur_node, 4);
-}
-
-// 动作3的逆时针
-cube_node *set_turn3_0(cube_node *cur_node)
-{
-    return turn_1(turn345_0(cur_node, 3), 4);
-}
-
-// 动作3的顺时针
+// 动作3的正向（顺时针）
 cube_node *set_turn3_1(cube_node *cur_node)
 {
     return turn_0(turn345_1(cur_node, 3), 4);
 }
 
+// 动作3的负向（逆时针）
+cube_node *set_turn3_0(cube_node *cur_node)
+{
+    return turn_1(turn345_0(cur_node, 3), 4);
+    // 先前后左右四个面的行变换，再对4down面顺时针旋转
+}
+
+// 动作4的正向（顺时针）
+cube_node *set_turn4_1(cube_node *cur_node)
+{
+    return turn345_1(cur_node, 4);
+    // 先前后左右四个面的行变换，由于行变换是中间行，不牵扯侧面旋转
+}
+
+// 动作4的负向（逆时针）
+cube_node *set_turn4_0(cube_node *cur_node)
+{
+    return turn345_0(cur_node, 4);
+    // 先前后左右四个面的行变换，由于行变换是中间行，不牵扯侧面旋转
+}
+
+// 动作5的正向（顺时针）
+cube_node *set_turn5_1(cube_node *cur_node)
+{
+    return turn_1(turn345_1(cur_node, 5), 1);
+    // 先前后左右四个面的行变换，再对1up面顺时针旋转
+}
+
+// 动作5的负向（逆时针）
+cube_node *set_turn5_0(cube_node *cur_node)
+{
+    return turn_0(turn345_0(cur_node, 5), 1);
+    // 先前后左右四个面的行变换，再对1up面逆时针旋转
+}
+
 // 针对上下左右四个面的顺时针旋转，在动作678中使用
+// k是动作对应的数字
 cube_node *turn678_1(cube_node *cur_node, int k)
 {
     cube_node *new_node = new cube_node();
@@ -239,15 +253,16 @@ cube_node *turn678_1(cube_node *cur_node, int k)
     int i, num = 8 - k;
     for (i = 0; i <= 2; i++)
     {
-        new_node->color[2][num][i] = cur_node->color[4][2 - num][2 - i];
-        new_node->color[1][num][i] = cur_node->color[2][num][i];
-        new_node->color[3][num][i] = cur_node->color[1][num][i];
-        new_node->color[4][2 - num][2 - i] = cur_node->color[3][num][i];
+        new_node->color[2][num][i] = cur_node->color[4][2 - num][2 - i]; // 下->左
+        new_node->color[1][num][i] = cur_node->color[2][num][i]; // 左->上
+        new_node->color[3][num][i] = cur_node->color[1][num][i]; // 上->右
+        new_node->color[4][2 - num][2 - i] = cur_node->color[3][num][i]; // 右->下
     }
     return new_node;
 }
 
 // 针对上下左右四个面的逆时针旋转，在动作678中使用
+// k是动作对应的数字
 cube_node *turn678_0(cube_node *cur_node, int k)
 {
     cube_node *new_node = new cube_node();
@@ -255,48 +270,54 @@ cube_node *turn678_0(cube_node *cur_node, int k)
     int i, num = 8 - k;
     for (i = 0; i <= 2; i++)
     {
-        new_node->color[4][2 - num][2 - i] = cur_node->color[2][num][i];
-        new_node->color[2][num][i] = cur_node->color[1][num][i];
-        new_node->color[1][num][i] = cur_node->color[3][num][i];
-        new_node->color[3][num][i] = cur_node->color[4][2 - num][2 - i];
+        new_node->color[4][2 - num][2 - i] = cur_node->color[2][num][i]; // 左->下
+        new_node->color[2][num][i] = cur_node->color[1][num][i]; // 上->左
+        new_node->color[1][num][i] = cur_node->color[3][num][i]; // 右->上
+        new_node->color[3][num][i] = cur_node->color[4][2 - num][2 - i]; // 下->右
     }
     return new_node;
 }
 
-// 动作6的逆时针
+// 动作6的负向（逆时针）
 cube_node *set_turn6_0(cube_node *cur_node)
 {
-    return turn_0(turn678_0(cur_node, 6), 0);
+    return turn_0(turn678_0(cur_node, 6), 0); 
+    // 先上下左右四个面的行变换，再对0front面逆时针旋转
 }
 
-// 动作6的顺时针
+// 动作6的正向（顺时针）
 cube_node *set_turn6_1(cube_node *cur_node)
 {
     return turn_1(turn678_1(cur_node, 6), 0);
+    // 先上下左右四个面的行变换，再对0front面顺时针旋转
 }
 
-// 动作7的逆时针
+// 动作7的负向（逆时针）
 cube_node *set_turn7_0(cube_node *cur_node)
 {
     return turn678_0(cur_node, 7);
+    // 先上下左右四个面的行变换，由于行变换是中间行，不牵扯侧面旋转
 }
 
-// 动作7的顺时针
+// 动作7的正向（顺时针）
 cube_node *set_turn7_1(cube_node *cur_node)
 {
     return turn678_1(cur_node, 7);
+    // 先上下左右四个面的行变换，由于行变换是中间行，不牵扯侧面旋转
 }
 
-// 动作8的逆时针
+// 动作8的负向（逆时针）
 cube_node *set_turn8_0(cube_node *cur_node)
 {
     return turn_1(turn678_0(cur_node, 8), 5);
+    // 先上下左右四个面的行变换，再对5back面逆时针旋转
 }
 
-// 动作8的顺时针
+// 动作8的正向（顺时针）
 cube_node *set_turn8_1(cube_node *cur_node)
 {
     return turn_0(turn678_1(cur_node, 8), 5);
+    // 先上下左右四个面的行变换，再对5back面顺时针旋转
 }
 
 // show:展示当前cube状态
@@ -334,6 +355,7 @@ int main()
 
     // 直接按照固定顺序读取，不依赖标签
     vector<int> file_to_internal = {5, 4, 0, 2, 3, 1};
+    // 按照测试样例的顺序读取 避免映射问题
 
     for (i = 0; i < 6; i++)
     {
@@ -409,8 +431,8 @@ int main()
     vector<cube_node*> all_nodes; // 用于内存管理
     
     node_queue.push(ori_cube_node);
-    visited_states.insert(*ori_cube_node);
-    all_nodes.push_back(ori_cube_node);
+    visited_states.insert(*ori_cube_node); // 防重复状态
+    all_nodes.push_back(ori_cube_node); //存new出来的节点最后delete
 
     bool found = false;
     cube_node *solution_node = nullptr;
